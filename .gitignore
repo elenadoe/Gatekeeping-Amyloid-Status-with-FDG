@@ -1,0 +1,12 @@
+*cache*
+*old*
+data*
+results/
+presentations/
+src/classification/
+src/conversion_frequency/
+src/gatekeeping_asis/
+src/outlier_check/
+src/parcellation_merge/
+src/time_difference_amyloid_fdg/
+src/README.ipynb
