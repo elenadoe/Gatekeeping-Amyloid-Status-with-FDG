@@ -1,5 +1,7 @@
 # Gatekeeping-Amyloid-Status-with-FDG
 
+A demonstration of the analyses can be found under src/demo.ipynb.
+
 **BACKGROUND**
 
 In patients with mild cognitive impairment (MCI), enhanced cerebral amyloid-β plaque burden is a high-risk factor to develop dementia with Alzheimer’s disease (AD). Not all patients have immediate access to the assessment of amyloid status (A-status) via gold standard methods. It may therefore be of interest to find suitable biomarkers to preselect patients benefitting most from additional workup of the A-status. In this study, we propose a machine learning-based gatekeeping system for the prediction of A-status on the grounds of pre-existing information on APOE-genotype 18F-FDG PET, age and sex.
