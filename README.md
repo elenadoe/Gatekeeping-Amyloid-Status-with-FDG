@@ -23,4 +23,4 @@ We have developed a gatekeeping methodology allowing approximation of amyloid st
 ![Alt text](https://github.com/elenadoe/Gatekeeping-Amyloid-Status-with-FDG/blob/main/Fig2.jpg "Clinical Utility of the Gatekeeping Methodology")
 
 If you make use of (parts of) the code used in this project, please cite us.
-The paper is currently under revision at EJNMMM.
+The paper is currently under revision at EJNM.
