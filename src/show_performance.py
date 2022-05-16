@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import nibabel as nib
 import seaborn as sns
+import pdb
 from IPython.display import display_html
 from sklearn.metrics import roc_curve, auc, fbeta_score, precision_score, \
     recall_score, confusion_matrix, make_scorer
@@ -45,7 +46,7 @@ def show_performance(y_true, pred):
           confusion_matrix(y_true, pred))
 
 
-def show_performance_tabular(validation, test, model_names, percentiles):
+def show_performance_tabular(validation, test, model_names, percentile):
     """
     Show performance of intermediate models in tabular form.
 
@@ -72,13 +73,13 @@ def show_performance_tabular(validation, test, model_names, percentiles):
     """
     df_validation = pd.DataFrame(
         validation, index=model_names).round(decimals=2)
-    df_validation.columns = percentiles
+    df_validation.columns = [percentile]
     dv_style = df_validation.style.set_table_attributes(
         "style='display:inline'").set_caption("Cross-validation Results")
 
     df_test = pd.DataFrame(
         test, index=model_names).round(decimals=2)
-    df_test.columns = percentiles
+    df_test.columns = [percentile]
     dt_style = df_test.style.set_table_attributes("style='display:inline'").\
         set_caption("Test Results")
 
@@ -86,7 +87,8 @@ def show_performance_tabular(validation, test, model_names, percentiles):
     return df_validation, df_test
 
 
-def show_performance_plot(df_validation, df_test, apoe):
+def show_performance_plot(df_validation, df_test, apoe_of_interest, percentile,
+                          drop_features, try_):
     """
     Show performance of intermediate models in bar plots.
 
@@ -126,7 +128,9 @@ def show_performance_plot(df_validation, df_test, apoe):
     ax[1].set_ylim(0.50, 1.0)
 
     plt.legend(bbox_to_anchor=[1.02, 1], loc='upper left')
-    plt.savefig('../results/Gatekeeping_{}.jpg'.format(str(apoe)),
+    plt.savefig(
+        '../results/Validation_Test_{}_{}_wo-{}{}.jpg'.format(
+            percentile, apoe_of_interest, drop_features, try_),
                 bbox_inches='tight')
     plt.show()
 
@@ -157,7 +161,8 @@ def show_performance_roc(y_true, pred):
     plt.show()
 
 
-def evaluate_misclassif(y_true, pred, pos_label, apoe_of_interest, ids_test):
+def evaluate_misclassif(y_true, pred, pos_label, apoe_of_interest, ids_test,
+                        try_, percentile, drop_features):
     """
 
 
@@ -185,19 +190,20 @@ def evaluate_misclassif(y_true, pred, pos_label, apoe_of_interest, ids_test):
               else 'fn' if (y_true[i] == pos_label and pred[i] == neg_label)
               else 'fp' if (y_true[i] == neg_label and pred[i] == pos_label)
               else 'error' for i in range(len(y_true))]
-    correctness = pd.concat((pd.DataFrame(ids_test, columns=['ID']),
+    correctness = pd.concat((pd.DataFrame(ids_test, columns=['PTID']),
                              pd.DataFrame(y_true, columns=['GT']),
                              pd.DataFrame(pred, columns=['PRED']),
                              pd.DataFrame(class_, columns=['CLASSIF'])),
                             axis=1)
 
-    correctness.to_csv("../results/correctness_{}.csv".format(
-        apoe_of_interest))
+    correctness.to_csv("../results/correctness_{}_{}_wo-{}{}.csv".format(
+        percentile, apoe_of_interest, drop_features, try_))
 
 
-def show_signal_dist(features_test_raw, pred, names, l_):
+def show_signal_dist(data_fdg, pred_csv, names, l_, apoe_of_interest,
+                     percentile, drop_features, try_):
     """
-    # TODO: include into permutation importance.
+    Show disstrubution of signals
 
     Parameters
     ----------
@@ -217,24 +223,55 @@ def show_signal_dist(features_test_raw, pred, names, l_):
     """
     sns.set(font_scale=1.3)
     sns.set_style("dark")
-    fig, ax = plt.subplots(1, 2, figsize=(13, 5))
-    reg_ind = np.argmax(l_)[0]
-    sns.violinplot(y=np.array(features_test_raw)[:, reg_ind],
-                   x=pred, ax=ax[0],
+    fig, ax = plt.subplots(1, 3, figsize=(18, 5))
+    if apoe_of_interest == 0:
+        order = [1, 0]
+    elif apoe_of_interest == 1:
+        order = [0, 1]
+    else:
+        order = input("In which order should graphs be displayed?")
+    # GET MOST IMPORTANT BRAIN REGION
+    reg_ind = np.argmax(l_[:90])
+    l_withoutmax = l_[:reg_ind] + l_[reg_ind+1:]
+    names_withoutmax = names[:reg_ind] + names[reg_ind+1:]
+    reg_ind2 = np.argmax(l_withoutmax[:89])
+    pred_csv = pred_csv[np.invert(np.isnan(pred_csv['pred']))]
+    pred = pred_csv['pred']
+    test_idx = [i in pred_csv['PTID'].tolist()
+                for i in data_fdg['PTID'].tolist()]
+    features_test_raw = data_fdg[test_idx]
+    features_test_raw.drop(columns=['PTID'], inplace=True)
+    features_test_raw = np.concatenate(
+        (features_test_raw, pred_csv['Age'].to_numpy().reshape(-1, 1),
+         pred_csv['Sex'].to_numpy().reshape(-1, 1)),
+        axis=1)
+
+    sns.violinplot(y=np.array(features_test_raw, dtype="float")[:, reg_ind],
+                   x=pred, ax=ax[0], order = order,
                    palette="Paired")
     ax[0].set_ylabel(np.array(names)[reg_ind])
     ax[0].set_xlabel('Prediction')
 
-    sns.violinplot(y=np.array(features_test_raw)[:, 90], x=pred, ax=ax[1],
+    sns.violinplot(y=np.array(features_test_raw, dtype="float")[:, reg_ind2],
+                   x=pred, ax=ax[1], order = order,
                    palette="Paired")
-    ax[1].set_ylabel("Age")
+    ax[1].set_ylabel(np.array(names_withoutmax)[reg_ind2])
     ax[1].set_xlabel('Prediction')
 
-    plt.savefig("../../results/regions_apoe-nc_violin_topfeat.jpg")
+    sns.violinplot(y=np.array(features_test_raw, dtype="float")[:, 90],
+                   x=pred, ax=ax[2], order = order,
+                   palette="Paired")
+    ax[2].set_ylabel("Age")
+    ax[2].set_xlabel('Prediction')
+
+    plt.savefig("../results/regions_{}_{}_wo-{}{}_violin_topfeat.jpg".format(
+        percentile, apoe_of_interest, drop_features, try_))
     plt.show()
 
 
-def show_importance(apoe_of_interest, repetitions=1000, random_state=0,
+def show_importance(apoe_of_interest, pred_csv, data_fdg, try_, percentile=100,
+                    drop_features=None,
+                    repetitions=1000, random_state=0,
                     info=True):
     """
     Calculate and show permutation importance.
@@ -265,18 +302,19 @@ def show_importance(apoe_of_interest, repetitions=1000, random_state=0,
     """
     # LOAD FEATURES, LABELS, MODEL, FEATURE NAMES AND FEATURE SELECTOR
     features = pickle.load(
-        open("../results/features/ADNI_features_{}.p".format(
-            apoe_of_interest), "rb"))
+        open("../results/features/ADNI_features_{}_{}_wo-{}{}.p".format(
+            percentile, apoe_of_interest, drop_features, try_), "rb"))
     y_true = pickle.load(
-        open("../results/features/ADNI_labels_{}.p".format(
-            apoe_of_interest), "rb"))
+        open("../results/features/ADNI_labels_{}_{}{}.p".format(
+            percentile, apoe_of_interest, try_), "rb"))
     model = pickle.load(
-        open("../results/final_model_{}.p".format(
-            apoe_of_interest), "rb"))
+        open("../results/final_model_{}_{}_wo-{}{}.p".format(
+            percentile, apoe_of_interest, drop_features, try_), "rb"))
     names = pickle.load(open("../config/region_names.p", "rb")) +\
         ['age', 'gender']
-    feature_select = pickle.load(open("../config/feature_select_{}.p".format(
-        apoe_of_interest), "rb"))
+    feature_select = pickle.load(
+        open("../config/feature_select_{}_{}_wo-{}{}.p".format(
+            percentile, apoe_of_interest, drop_features, try_), "rb"))
     feature_ind = feature_select.get_support(indices=True)
     feature_names = np.array(names)[feature_ind]
 
@@ -294,12 +332,12 @@ def show_importance(apoe_of_interest, repetitions=1000, random_state=0,
     # WAS PREVIOUSLY APPLIED)
     l_ = [0]*118
     count = 0
-    txt = open("../results/permutation_importance_{}.txt".format(
-        apoe_of_interest), "w")
+    txt = open("../results/permutation_importance_{}_{}_wo-{}{}.txt".format(
+        percentile, apoe_of_interest, drop_features, try_), "w")
     for n in range(118):
         if n in feature_ind:
-            txt.write(str(n) + "\t" + feature_names[n] + "\t" +
-                      str(round(feat_imp[count], 3)))
+            txt.write(str(n) + "\t" + feature_names[count] + "\t" +
+                      str(round(feat_imp[count], 3)) + "\n")
             l_[n] = feat_imp[count]
             count += 1
         else:
@@ -332,8 +370,8 @@ def show_importance(apoe_of_interest, repetitions=1000, random_state=0,
     # SAVE RESULT AS NIFTI IMAGE
     atlas_final = image.new_img_like(atlas, atlas_matrix_stat)
     nib.save(atlas_final,
-             "../results/permutation_importance_{}.nii".format(
-                 apoe_of_interest))
+             "../results/permutation_importance_{}_{}_wo-{}{}.nii".format(
+                 percentile, apoe_of_interest, drop_features, try_))
     if info:
         print("Total permutation importance: ",
               sum(feature_importance.importances_mean))
@@ -341,8 +379,9 @@ def show_importance(apoe_of_interest, repetitions=1000, random_state=0,
               sum(feature_importance.importances_mean[
                   np.where(feature_importance.importances_mean > 0)]))
         print("Text file and Nifti for permutation importance ",
-              "stored under ../results/permutation_importance_{}".format(
-                  apoe_of_interest))
+              "stored under ../results/permutation_",
+              "importance_{}_{}_wo-{}".format(percentile, apoe_of_interest,
+                                              drop_features), sep="")
 
         fig = plt.figure(figsize=(10, 5), frameon=False)
 
@@ -352,3 +391,7 @@ def show_importance(apoe_of_interest, repetitions=1000, random_state=0,
                                cut_coords=(35, -37, 15))
         # plt.savefig("../results/knn_regions_apoe-c_multim.jpg")
         plt.show()
+
+    show_signal_dist(data_fdg, pred_csv=pred_csv, names=names, l_=l_,
+                     try_=try_, apoe_of_interest=apoe_of_interest,
+                     percentile=percentile, drop_features=drop_features)

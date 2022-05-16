@@ -16,13 +16,13 @@ from sklearn.metrics import make_scorer, balanced_accuracy_score, \
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.utils import shuffle, resample
-from tqdm import tqdm
+from show_performance import evaluate_misclassif
 
 
 # %%
 
 f_tenth = make_scorer(fbeta_score, beta=0.1)
-
+random_state = 0
 
 def evaluate(scoring, y_true, y_pred):
     """
@@ -65,7 +65,7 @@ def evaluate(scoring, y_true, y_pred):
 
 
 def upsample(X_train, y_train, maj_class, info=True,
-             random_state=42):
+             random_state=random_state):
     """
     Automatic upsampling of minority class.
 
@@ -139,11 +139,14 @@ def classifier_feature_search_cv(X_train, y_train,
                                  params,
                                  scoring,
                                  apoe_of_interest,
+                                 percentile,
+                                 cv,
+                                 maj_class,
+                                 try_,
+                                 info=True,
+                                 drop_features=None,
                                  upsampling=True,
-                                 percentiles=[100],
-                                 cv=10,
-                                 maj_class=1,
-                                 random_state=42):
+                                 random_state=random_state):
     """
     Hyperparameter search.
 
@@ -174,12 +177,11 @@ def classifier_feature_search_cv(X_train, y_train,
     scoring : str or sklearn scoring metric
         Can be any sklearn scoring metric, or "f_tenth" for F_1/10 score
     apoe_of_interest : int
-        Whether APOE4-nc (0) or APOE4-c (1) are investigated.
-        Must be between 0 - 2.
+        Whether APOE4-nc (0), APOE4-c (1) or all (-1) are investigated.
     upsampling : boolean, optional
         Whether or not to use upsampling to avoid overfitting.
         The default is True.
-    percentiles : int or float, optional
+    percentile : int or float, optional
         Proportion of most important features to keep. The default is [100].
     cv : int, optional
         How many folds to split training data into for cross-validation.
@@ -210,47 +212,59 @@ def classifier_feature_search_cv(X_train, y_train,
 
     # PREPARE DATA STORAGE
     fitted_models = {}
-    validation = np.empty(shape=(len(model_list), len(percentiles)))
-    test = np.empty(shape=(len(model_list), len(percentiles)))
+    validation = np.empty(shape=(len(model_list)))
+    test = np.empty(shape=(len(model_list)))
 
-    # ITERATE OVER ALL PERCENTILES OF INPUT FEATURES TO BE ASSESSED
-    for p in percentiles:
-        fitted_models_pp = []
-        print("PERCENTILE: Upper {}% of training data".format(p))
-        features_train, features_test = transform_data.feature_transform(
-            X_train, y_train, X_test, apoe_of_interest)
+    print("PERCENTILE: {}% of features".format(percentile))
+    features_train, features_test = transform_data.feature_transform(
+            X_train, y_train, X_test, apoe_of_interest,
+            drop_features=drop_features,
+            percentile=percentile, save=True, try_=try_)
+    pickle.dump(features_test,
+                open(
+                    "../results/features/ADNI_features_{}_{}_wo-{}{}.p".format(
+                    percentile, apoe_of_interest, drop_features, try_), "wb"))
 
-        if upsampling:
-            features_train, y_train_ups = upsample(features_train, y_train,
-                                                   maj_class=maj_class)
+    if upsampling:
+        features_train, y_train_ups = upsample(features_train, y_train,
+                                               maj_class=maj_class)
 
-        else:
-            y_train_ups = y_train
+    else:
+        y_train_ups = y_train
 
-        for i in tqdm(range(len(model_list))):
-            classifier = model_list[i]
-            clf = GridSearchCV(classifier, params[model_names[i]],
-                               n_jobs=-1, cv=StratifiedKFold(n_splits=cv),
-                               scoring=scoring1)
-            clf.fit(features_train, y_train_ups)
+    if info:
+        verbose = 2
+    else:
+        verbose = 0
+    for i in range(len(model_list)):
+        classifier = model_list[i]
+        clf = GridSearchCV(classifier, params[model_names[i]],
+                           n_jobs=-1, cv=StratifiedKFold(
+                               n_splits=cv, shuffle=True,
+                               random_state=random_state),
+                           scoring=scoring1, verbose=verbose)
+        clf.fit(features_train, y_train_ups)
 
-            # VALIDATION PERFORMANCE
-            validation[i, percentiles.index(p)] = clf.best_score_
-            fitted_models_pp.append(clf.best_estimator_)
-
-            # TEST PERFORMANCE
-            pred = clf.predict(features_test)
-            test[i, percentiles.index(p)] = evaluate(
-                scoring1, y_test, pred)
-
+        # VALIDATION PERFORMANCE
+        validation[i] = clf.best_score_
         # SAVE TRAINED MODEL
-        fitted_models[p] = fitted_models_pp
+        fitted_models[i] = clf.best_estimator_
 
-    return validation, test, fitted_models
+        # TEST PERFORMANCE
+        pred = clf.predict(features_test)
+        test[i] = evaluate(
+            scoring1, y_test, pred)
+        if info:
+            print("Best hyperparams:", fitted_models[i])
+            print("Validation Average: ", validation[i],
+                  "Test: ", test[i])
+
+    return validation, test, fitted_models, features_test
 
 
 def choose_best_model(validation, test, fitted_models, X_train,
-                      y_train, X_test, apoe_of_interest, percentile=100):
+                      y_train, X_test, apoe_of_interest, percentile,
+                      drop_features, try_, info=True):
     """
     Choose final model among intermediate models.
 
@@ -280,8 +294,7 @@ def choose_best_model(validation, test, fitted_models, X_train,
         Input features: mean FDG-PET in 90 regions, age and sex
         for all subjets of the test set
     apoe_of_interest : int
-        Whether APOE4-nc (0) or APOE4-c (1) are investigated.
-        Must be between 0 - 2.
+        Whether APOE4-nc (0), APOE4-c (1) or all (-1) are investigated.
     percentile: int or float, optional
         Proportion of most important features to keep. The default is 100.
 
@@ -299,6 +312,9 @@ def choose_best_model(validation, test, fitted_models, X_train,
     """
     # FIND BEST VALIDATION MODEL
     v_ind = np.where(validation == np.max(validation))[0]
+    if info:
+        print("Validation scores: ", validation)
+        print("Best index: ", v_ind)
     # IF TWO OR MORE VALIDATION MODELS PERFORM BEST, CONSIDER MODEL
     # PERFORMING BEST ON ADNI TEST DATA AS FINAL
     if len(v_ind) > 1:
@@ -306,25 +322,25 @@ def choose_best_model(validation, test, fitted_models, X_train,
             np.array(test)[v_ind]))[0][0]
     else:
         max_ind = 0
+
     final_ind = np.where(
         (np.array(validation) == validation[v_ind[max_ind]]) &
         (np.array(test) == test[v_ind[max_ind]]))
-    best_model = fitted_models[percentile][final_ind[0][0]]
+    best_model = fitted_models[final_ind[0][0]]
     print("Hyperparameters differing from scikit-learn default:", best_model)
 
     pickle.dump(best_model,
-                open("../results/final_model_{}.p".format(apoe_of_interest),
-                     "wb"))
+                open("../results/final_model_{}_{}_wo-{}{}.p".format(
+                    percentile, apoe_of_interest, drop_features, try_), "wb"))
 
-    features_test = transform_data.feature_transform(
-        X_train, y_train, X_test, apoe_of_interest, save=True)[1]
-
-    return best_model, features_test
+    return best_model
 
 
-def train_test_adni(df_fdg, df_data, apoe_of_interest, test_size=0.3,
-                    upsampling=True, cv=10, scoring='f_tenth', random_state=0,
-                    percentiles=[100], info=True):
+def train_test_adni(df_fdg, df_data, apoe_of_interest, percentile, try_,
+                    drop_features=None,
+                    test_size=0.3,
+                    upsampling=True, cv=10, scoring='f_tenth',
+                    random_state=random_state, info=True):
     """
     Execute cross-validation and testing.
 
@@ -332,10 +348,10 @@ def train_test_adni(df_fdg, df_data, apoe_of_interest, test_size=0.3,
 
     Parameters
     ----------
-    df_fdg : csv table
+    df_fdg : pd.DataFrame
         Input features: mean FDG-PET in 90 regions for all available subjects
         (outlier analysis and exclusion must be done prior to this step)
-    df_data :  csv table
+    df_data :  pd.DataFrame
         Data table including apoe, age and sex information for all subjects.
         Columns must be named PTID for id, APOE4 for apoe, AGE for age
         and PTGENDER for sex.
@@ -361,7 +377,7 @@ def train_test_adni(df_fdg, df_data, apoe_of_interest, test_size=0.3,
     random_state :  int, optional
         random seed. The default is 42.
     percentiles : int or float, optional
-        Proportion of most important features to keep. The default is [100].
+        Proportion of most important features to keep. The default is 100.
     info : boolean, optional
         Whether to provide information on internal stats.
         The default is True.
@@ -372,40 +388,78 @@ def train_test_adni(df_fdg, df_data, apoe_of_interest, test_size=0.3,
     None.
 
     """
+
     if apoe_of_interest == 0:
         maj_class = 0
-    elif apoe_of_interest > 0:
+    elif apoe_of_interest == 1:
         maj_class = 1
+    elif apoe_of_interest == -1:
+        maj_class = int(input("Which majority class is investigated? "))
+        scoring = input("Which metric should be used for training? ")
 
     # GET DATA FROM DATAFRAMES
-    subject_vectors, y_true, ids, gender, age = transform_data.extract_data(
-        df_fdg, df_data, maj_class=maj_class,
-        apoe_of_interest=apoe_of_interest)
+    subject_vectors, y_true,\
+        ids, gender, age, apoe,\
+        av45, mmse, race, cdr = transform_data.extract_data(
+            df_fdg, df_data, pos=maj_class,
+            apoe_of_interest=apoe_of_interest, info=info)
 
     # SPLIT INTO TRAIN AND TEST SET
-    X_train, X_test, y_train, y_test, \
-        age_train, age_test, ids_train, ids_test, \
-        gender_train, gender_test = train_test_split(
-            subject_vectors, y_true, age, ids, gender,
-            test_size=test_size, stratify=y_true,
-            random_state=random_state)
+    if drop_features == "add_apoe":
+        X_train, X_test, y_train, y_test, \
+            age_train, age_test, ids_train, ids_test, \
+            gender_train, gender_test,\
+            apoe_train, apoe_test = train_test_split(
+                subject_vectors, y_true, age, ids, gender, apoe,
+                test_size=test_size, stratify=y_true,
+                random_state=random_state)
+    else:
+        X_train, X_test, y_train, y_test, \
+            age_train, age_test, ids_train, ids_test, \
+            gender_train, gender_test, av45_train, av45_test,\
+            mmse_train, mmse_test, race_train, race_test,\
+            cdr_train, cdr_test = train_test_split(
+                subject_vectors, y_true, age, ids, gender, av45, mmse, race,
+                cdr, test_size=test_size, stratify=y_true,
+                random_state=random_state)
+
     if info:
-        print("TRAIN SET: n_minority class: ", np.bincount(y_train)[0],
-              "n_majority class: ", np.bincount(y_train)[1],
-              "\nTEST SET: n_minority class: ", np.bincount(y_test)[0],
-              "n_majority class: ", np.bincount(y_test)[1])
+        transform_data.info_on(y_train, y_test, age_train, age_test,
+                               gender_train, gender_test, 
+                               race_train, race_test, av45_train, av45_test,
+                               cdr_train, cdr_test)
 
     # PREPARE DATA
     scaled_data = transform_data.scale_data(
         [X_train, age_train], [X_test, age_test],
-        ['X_train', 'age_train'], apoe_of_interest)
-    [X_train, age_train] = scaled_data[0]
-    [X_test, age_test] = scaled_data[1]
+        ['X_train', 'age_train'], try_=try_, apoe_of_interest=apoe_of_interest,
+        percentile=percentile)
+    [X_train_s, age_train_s] = scaled_data[0]
+    [X_test_s, age_test_s] = scaled_data[1]
 
     X_train = np.concatenate(
-        (X_train, age_train, np.array(gender_train).reshape(-1, 1)), axis=1)
+        (X_train_s, age_train_s, np.array(gender_train).reshape(-1, 1)),
+        axis=1)
     X_test = np.concatenate(
-        (X_test, age_test, np.array(gender_test).reshape(-1, 1)), axis=1)
+        (X_test_s, age_test_s, np.array(gender_test).reshape(-1, 1)), axis=1)
+    print("Shape of X_train: ", X_train.shape)
+    if drop_features == "fdg":
+        X_train = X_train[:, [-2, -1]]
+        X_test = X_test[:, [-2, -1]]
+    elif drop_features == "age":
+        X_train = X_train[:, list(range(90)) + [-1]]
+        X_test = X_test[:, list(range(90)) + [-1]]
+    elif drop_features == "gender":
+        X_train = X_train[:, list(range(90)) + [-2]]
+        X_test = X_test[:, list(range(90)) + [-2]]
+    elif drop_features == "add_apoe":
+        X_train = np.concatenate(
+            (X_train, np.array(apoe_train).reshape(-1,1)), axis=1)
+        X_test = np.concatenate(
+            (X_test, np.array(apoe_test).reshape(-1,1)), axis=1)
+
+    print("Drop features: {}".format(drop_features),
+          "Shape of X_train: ", X_train.shape)
 
     # SET UP MODELS AND LOAD HYPERPARAMETERS
     model_names = ['KNN', 'SVC', 'GPC', 'DNN', 'RFC', 'LOGR']
@@ -414,48 +468,55 @@ def train_test_adni(df_fdg, df_data, apoe_of_interest, test_size=0.3,
                   SVC(random_state=random_state),
                   GaussianProcessClassifier(random_state=random_state,
                                             n_jobs=-1),
-                  MLPClassifier(random_state=random_state, max_iter=100),
+                  MLPClassifier(random_state=random_state, max_iter=100,
+                                early_stopping=True, tol=1e-5),
                   RandomForestClassifier(random_state=random_state),
                   LogisticRegression(random_state=random_state)]
-    parameter_space = pickle.load(open("../config/hyperparams_allmodels.p",
+    parameter_space = pickle.load(open("../config/hyperparams_allmodels_2.p",
                                        "rb"))
 
     # CROSS-VALIDATED SEARCH FOR OPTIMAL HYPERPARAMETER CONFIGURATIONS
     # yields intermediate models
-    v, t, models = classifier_feature_search_cv(
+    v, t, models, features_test = classifier_feature_search_cv(
         X_train, y_train,
         X_test, y_test,
         apoe_of_interest=apoe_of_interest,
         maj_class=maj_class,
         upsampling=upsampling,
         cv=cv,
+        random_state=random_state,
         model_list=model_list, model_names=model_names,
         params=parameter_space,
-        percentiles=percentiles,
+        info=info,
+        drop_features=drop_features,
+        try_=try_,
+        percentile=percentile,
         scoring=scoring)
 
     # SHOW RESULTS FROM CROSS-VALIDATION
     df_validation, df_test = show_performance.show_performance_tabular(
-        v, t, model_names, percentiles)
+        v, t, model_names, percentile)
     if info:
         show_performance.show_performance_plot(df_validation, df_test,
-                                               apoe_of_interest)
+                                               apoe_of_interest, percentile,
+                                               drop_features, try_=try_)
 
     # CHOOSE FINAL MODEL
-    best_model, features_test = choose_best_model(
-        v, t, models, X_train, y_train, X_test, apoe_of_interest)
-    pickle.dump(features_test,
-                open("../results/features/ADNI_features_{}.p".format(
-                    apoe_of_interest), "wb"))
+    best_model = choose_best_model(
+        v, t, models, X_train, y_train, X_test, apoe_of_interest, info=info,
+        percentile=percentile, drop_features=drop_features, try_=try_,)
     pickle.dump(y_test,
-                open("../results/features/ADNI_labels_{}.p".format(
-                    apoe_of_interest), "wb"))
+                open("../results/features/ADNI_labels_{}_{}{}.p".format(
+                    percentile, apoe_of_interest, try_), "wb"))
 
     # YIELD PREDICTIONS FROM FINAL MODEL FOR FINAL EVAL
     pred = best_model.predict(features_test)
-    if info:
-        show_performance.show_performance(y_test, pred)
 
-    # show_performance.show_performance_roc(y_test, pred)
-    # show_performance.evaluate_misclassif(y_test, pred, maj_class,
-    #                                     apoe_of_interest, ids_test)
+    show_performance.show_performance(y_test, pred)
+    if info:
+        # save predictions
+        transform_data.save_results(df_data, ids_test, pred, age_test,
+                                    gender_test, apoe_of_interest,
+                                    percentile=percentile,
+                                    drop_features=drop_features,
+                                    try_=try_)
