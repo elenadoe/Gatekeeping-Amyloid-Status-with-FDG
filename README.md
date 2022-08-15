@@ -1,7 +1,9 @@
 # Gatekeeping-Amyloid-Status-with-FDG
 
-A demonstration of the analyses can be found under src/demo.ipynb. If you make use of this code or its parts, please cite 
+If you make use of this code or its parts, please cite 
 Doering, E., Hoenig, M.C., Bischof, G.N. et al. Introducing a gatekeeping system for amyloid status assessment in mild cognitive impairment. Eur J Nucl Med Mol Imaging (2022). https://doi.org/10.1007/s00259-022-05879-6
+
+A demonstration of the analyses can be found under src/demo.ipynb. 
 
 **BACKGROUND**
 
