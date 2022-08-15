@@ -1,7 +1,8 @@
 # Gatekeeping-Amyloid-Status-with-FDG
 
-If you make use of this code or its parts, please cite 
-Doering, E., Hoenig, M.C., Bischof, G.N. et al. Introducing a gatekeeping system for amyloid status assessment in mild cognitive impairment. Eur J Nucl Med Mol Imaging (2022). https://doi.org/10.1007/s00259-022-05879-6
+This is the supporting code to the following manuscript: 
+**Doering, E., Hoenig, M.C., Bischof, G.N. et al. Introducing a gatekeeping system for amyloid status assessment in mild cognitive impairment. Eur J Nucl Med Mol Imaging (2022). https://doi.org/10.1007/s00259-022-05879-6**
+If you make use of this code or its parts, please cite us.
 
 A demonstration of the analyses can be found under src/demo.ipynb. 
 
@@ -24,5 +25,3 @@ Aβ- was predicted with a precision of 81 – 83% in APOE4-nc and Aβ+ was predi
 We have developed a gatekeeping methodology allowing approximation of amyloid status in MCI with good reliability using APOE-genotype, 18F-FDG PET, age and sex information. The algorithm could enable better estimation of individual risk for developing AD based on existing biomarker information, and support efficient selection of patients who would benefit most from further etiological clarification. Further potential utility in clinical routine and clinical trials is discussed.
 
 ![Alt text](https://github.com/elenadoe/Gatekeeping-Amyloid-Status-with-FDG/blob/main/Fig2.jpg "Clinical Utility of the Gatekeeping Methodology")
-
-If you make use of (parts of) the code used in this project, please cite us.
